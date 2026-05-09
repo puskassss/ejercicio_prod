@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 import numpy as np
+import matplotlib.pyplot as plt
 
 # ── Configuración de página ────────────────────────────────────
 st.set_page_config(
@@ -76,6 +75,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ── Estilo matplotlib oscuro ───────────────────────────────────
+plt.rcParams.update({
+    'figure.facecolor':  '#0a1a0a',
+    'axes.facecolor':    '#0a1a0a',
+    'axes.edgecolor':    '#1e3a1e',
+    'axes.labelcolor':   '#7a9980',
+    'xtick.color':       '#7a9980',
+    'ytick.color':       '#7a9980',
+    'text.color':        '#e0f5e0',
+    'grid.color':        '#1e3a1e',
+    'grid.linestyle':    '--',
+    'grid.alpha':        0.5,
+})
+
 # ── Carga de datos ─────────────────────────────────────────────
 @st.cache_data
 def cargar_datos():
@@ -86,7 +99,7 @@ def cargar_datos():
 try:
     df = cargar_datos()
 except FileNotFoundError:
-    st.error("⚠️ No se encontró 'caso3_produccion_dataset.csv'. Asegúrate de que esté en el mismo directorio.")
+    st.error("⚠️ No se encontró 'caso3_produccion_dataset.csv'.")
     st.stop()
 
 # ── SIDEBAR ────────────────────────────────────────────────────
@@ -96,21 +109,9 @@ with st.sidebar:
     st.divider()
     st.markdown("### 🔍 Filtros")
 
-    lineas = st.multiselect(
-        "Línea de producción",
-        options=sorted(df['linea_produccion'].unique()),
-        default=sorted(df['linea_produccion'].unique())
-    )
-    turnos = st.multiselect(
-        "Turno",
-        options=sorted(df['turno'].unique()),
-        default=sorted(df['turno'].unique())
-    )
-    maquinas = st.multiselect(
-        "Máquina",
-        options=sorted(df['maquina'].unique()),
-        default=sorted(df['maquina'].unique())
-    )
+    lineas = st.multiselect("Línea de producción", options=sorted(df['linea_produccion'].unique()), default=sorted(df['linea_produccion'].unique()))
+    turnos = st.multiselect("Turno", options=sorted(df['turno'].unique()), default=sorted(df['turno'].unique()))
+    maquinas = st.multiselect("Máquina", options=sorted(df['maquina'].unique()), default=sorted(df['maquina'].unique()))
 
     st.divider()
     solo_baja_eficiencia = st.checkbox("⚠️ Solo baja eficiencia (<70% y defectos >5%)")
@@ -123,7 +124,6 @@ df_f = df[
     df['turno'].isin(turnos) &
     df['maquina'].isin(maquinas)
 ]
-
 if solo_baja_eficiencia:
     df_f = df_f[(df_f['eficiencia_pct'] < 70) & (df_f['tasa_defectos_pct'] > 5)]
 
@@ -141,11 +141,11 @@ baja_ef_count       = len(df_f[(df_f['eficiencia_pct'] < 70) & (df_f['tasa_defec
 
 c1, c2, c3, c4, c5 = st.columns(5)
 for col, icon, val, label in [
-    (c1, "📦", f"{total_unidades:,}",          "Unidades Producidas"),
-    (c2, "⚙️", f"{eficiencia_promedio:.1f}%",  "Eficiencia Promedio"),
-    (c3, "❌", f"{total_defectuosas:,}",        "Unidades Defectuosas"),
-    (c4, "💰", f"${costo_total/1e6:.1f}M",      "Costo Producción COP"),
-    (c5, "⚠️", str(baja_ef_count),             "Órdenes Críticas"),
+    (c1, "📦", f"{total_unidades:,}",         "Unidades Producidas"),
+    (c2, "⚙️", f"{eficiencia_promedio:.1f}%", "Eficiencia Promedio"),
+    (c3, "❌", f"{total_defectuosas:,}",       "Unidades Defectuosas"),
+    (c4, "💰", f"${costo_total/1e6:.1f}M",     "Costo Producción COP"),
+    (c5, "⚠️", str(baja_ef_count),            "Órdenes Críticas"),
 ]:
     with col:
         st.markdown(f"""<div class="kpi-card">
@@ -156,94 +156,90 @@ for col, icon, val, label in [
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+# ── Colores por línea ──────────────────────────────────────────
+GREEN_SCALE   = ['#00e066', '#00b34d', '#008037', '#005522']
+lineas_unicas = sorted(df_f['linea_produccion'].unique()) if len(df_f) else []
+color_linea   = {l: GREEN_SCALE[i % len(GREEN_SCALE)] for i, l in enumerate(lineas_unicas)}
+
 # ── FILA 1: Barras eficiencia + Pie causas paro ────────────────
 col_a, col_b = st.columns([3, 2])
 
 with col_a:
     st.markdown('<div class="section-title">⚙️ Eficiencia Promedio por Línea</div>', unsafe_allow_html=True)
-    eficiencia_linea = (
-        df_f.groupby('linea_produccion')
-            .agg(
-                eficiencia_promedio=('eficiencia_pct', 'mean'),
-                unidades_producidas=('unidades_producidas', 'sum'),
-                unidades_defectuosas=('unidades_defectuosas', 'sum')
-            )
-            .round(2).reset_index()
+    ef_linea = (
+        df_f.groupby('linea_produccion')['eficiencia_pct']
+            .mean().round(1).reset_index()
+            .sort_values('eficiencia_pct')
     )
-    fig1 = px.bar(
-        eficiencia_linea,
-        x='linea_produccion', y='eficiencia_promedio',
-        color='eficiencia_promedio', color_continuous_scale='RdYlGn',
-        text_auto='.1f',
-        labels={'linea_produccion': 'Línea', 'eficiencia_promedio': 'Eficiencia (%)'}
-    )
-    fig1.update_layout(
-        template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)', coloraxis_showscale=False,
-        height=320, margin=dict(l=0, r=10, t=10, b=30)
-    )
-    st.plotly_chart(fig1, use_container_width=True)
+    fig, ax = plt.subplots(figsize=(7, 3.2))
+    colores = ['#e05050' if v < 70 else '#f0c040' if v < 85 else '#00e066' for v in ef_linea['eficiencia_pct']]
+    bars = ax.barh(ef_linea['linea_produccion'], ef_linea['eficiencia_pct'], color=colores, height=0.5)
+    ax.bar_label(bars, fmt='%.1f%%', padding=4, color='#e0f5e0', fontsize=9)
+    ax.set_xlabel('Eficiencia (%)', fontsize=8)
+    ax.set_xlim(0, 115)
+    ax.grid(axis='x')
+    ax.spines[['top', 'right', 'left']].set_visible(False)
+    fig.tight_layout()
+    st.pyplot(fig)
+    plt.close()
 
 with col_b:
     st.markdown('<div class="section-title">⏱️ Causas de Paro</div>', unsafe_allow_html=True)
-    paros_causa = (
-        df_f.groupby('causa_paro')
-            .agg(tiempo_total_min=('tiempo_paro_min', 'sum'))
-            .reset_index()
+    paros = df_f.groupby('causa_paro')['tiempo_paro_min'].sum()
+    fig, ax = plt.subplots(figsize=(4, 3.2))
+    wedge_colors = ['#00e066', '#f0c040', '#e05050', '#4488ff']
+    wedges, texts, autotexts = ax.pie(
+        paros.values, labels=paros.index, autopct='%1.1f%%',
+        colors=wedge_colors[:len(paros)], wedgeprops=dict(width=0.6),
+        startangle=90, textprops={'fontsize': 8, 'color': '#e0f5e0'}
     )
-    fig2 = px.pie(
-        paros_causa, names='causa_paro', values='tiempo_total_min',
-        color_discrete_sequence=px.colors.qualitative.Set2,
-        hole=0.45
-    )
-    fig2.update_layout(
-        template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)',
-        height=320, margin=dict(l=0, r=0, t=10, b=10),
-        legend=dict(font=dict(size=11))
-    )
-    st.plotly_chart(fig2, use_container_width=True)
+    for at in autotexts:
+        at.set_color('#0a1a0a')
+        at.set_fontsize(7)
+    fig.tight_layout()
+    st.pyplot(fig)
+    plt.close()
 
 # ── FILA 2: Serie de tiempo ────────────────────────────────────
 st.markdown('<div class="section-title">📅 Evolución Mensual de Eficiencia</div>', unsafe_allow_html=True)
-eficiencia_mes = (
+ef_mes = (
     df_f.groupby(df_f['fecha_produccion'].dt.to_period('M'))['eficiencia_pct']
         .mean().reset_index()
 )
-eficiencia_mes['fecha_produccion'] = eficiencia_mes['fecha_produccion'].astype(str)
-fig3 = px.line(
-    eficiencia_mes, x='fecha_produccion', y='eficiencia_pct', markers=True,
-    labels={'fecha_produccion': 'Mes', 'eficiencia_pct': 'Eficiencia (%)'}
-)
-fig3.update_traces(line_color='#00e066', line_width=2.5, marker_size=6)
-fig3.update_layout(
-    template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)',
-    plot_bgcolor='rgba(0,0,0,0)', height=280,
-    margin=dict(l=0, r=0, t=10, b=40)
-)
-st.plotly_chart(fig3, use_container_width=True)
+ef_mes['fecha_produccion'] = ef_mes['fecha_produccion'].astype(str)
+fig, ax = plt.subplots(figsize=(12, 2.8))
+ax.plot(ef_mes['fecha_produccion'], ef_mes['eficiencia_pct'],
+        color='#00e066', linewidth=2.5, marker='o', markersize=5)
+ax.fill_between(ef_mes['fecha_produccion'], ef_mes['eficiencia_pct'], alpha=0.15, color='#00e066')
+ax.axhline(y=70, color='#e05050', linestyle='--', linewidth=1, alpha=0.7, label='Meta mín. 70%')
+ax.set_xlabel('Mes', fontsize=8)
+ax.set_ylabel('Eficiencia (%)', fontsize=8)
+ax.legend(fontsize=8, framealpha=0.2)
+ax.grid(axis='y')
+ax.spines[['top', 'right']].set_visible(False)
+plt.xticks(rotation=45, ha='right', fontsize=7)
+fig.tight_layout()
+st.pyplot(fig)
+plt.close()
 
 # ── FILA 3: Scatter + Heatmap ──────────────────────────────────
 col_c, col_d = st.columns(2)
 
 with col_c:
     st.markdown('<div class="section-title">🔍 Tiempo de Paro vs Tasa de Defectos</div>', unsafe_allow_html=True)
-    fig4 = px.scatter(
-        df_f, x='tiempo_paro_min', y='tasa_defectos_pct',
-        color='linea_produccion',
-        hover_data=['producto', 'turno', 'maquina'],
-        labels={
-            'tiempo_paro_min': 'Tiempo de Paro (min)',
-            'tasa_defectos_pct': 'Tasa de Defectos (%)'
-        },
-        opacity=0.7
-    )
-    fig4.update_layout(
-        template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)', height=340,
-        margin=dict(l=0, r=0, t=10, b=40),
-        legend=dict(title='', font=dict(size=10))
-    )
-    st.plotly_chart(fig4, use_container_width=True)
+    fig, ax = plt.subplots(figsize=(5.5, 3.5))
+    for linea in lineas_unicas:
+        sub = df_f[df_f['linea_produccion'] == linea]
+        ax.scatter(sub['tiempo_paro_min'], sub['tasa_defectos_pct'],
+                   label=linea, color=color_linea[linea], alpha=0.6, s=20)
+    ax.set_xlabel('Tiempo de Paro (min)', fontsize=8)
+    ax.set_ylabel('Tasa de Defectos (%)', fontsize=8)
+    ax.legend(fontsize=7, framealpha=0.2)
+    ax.grid(True)
+    ax.spines[['top', 'right']].set_visible(False)
+    fig.tight_layout()
+    st.pyplot(fig)
+    plt.close()
 
 with col_d:
     st.markdown('<div class="section-title">🌡️ Eficiencia por Línea y Turno</div>', unsafe_allow_html=True)
@@ -252,19 +248,25 @@ with col_d:
             values='eficiencia_pct', index='linea_produccion',
             columns='turno', aggfunc='mean'
         ).round(1)
-        fig5 = px.imshow(
-            pivot, color_continuous_scale='RdYlGn', text_auto='.1f',
-            labels={'color': 'Eficiencia (%)'}
-        )
-        fig5.update_layout(
-            template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)',
-            height=340, margin=dict(l=0, r=0, t=10, b=40)
-        )
-        st.plotly_chart(fig5, use_container_width=True)
+        fig, ax = plt.subplots(figsize=(5.5, 3.5))
+        im = ax.imshow(pivot.values, cmap='RdYlGn', aspect='auto', vmin=50, vmax=100)
+        ax.set_xticks(range(len(pivot.columns)))
+        ax.set_xticklabels(pivot.columns, fontsize=8)
+        ax.set_yticks(range(len(pivot.index)))
+        ax.set_yticklabels(pivot.index, fontsize=8)
+        for i in range(len(pivot.index)):
+            for j in range(len(pivot.columns)):
+                val = pivot.values[i, j]
+                ax.text(j, i, f'{val:.1f}%', ha='center', va='center',
+                        fontsize=8, color='#0a1a0a')
+        plt.colorbar(im, ax=ax, shrink=0.8)
+        fig.tight_layout()
+        st.pyplot(fig)
+        plt.close()
     else:
         st.info("Sin datos para mostrar.")
 
-# ── TABLA: Órdenes con baja eficiencia ────────────────────────
+# ── TABLA: Órdenes críticas ────────────────────────────────────
 st.divider()
 st.markdown('<div class="section-title">⚠️ Órdenes Críticas — Eficiencia &lt;70% y Defectos &gt;5%</div>', unsafe_allow_html=True)
 
@@ -280,9 +282,7 @@ if len(baja_ef_df) > 0:
     st.markdown(f'<div class="alerta-baja">⚠️ Se encontraron <strong>{len(baja_ef_df)}</strong> órdenes con baja eficiencia y alta tasa de defectos.</div>', unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     st.dataframe(
-        baja_ef_df,
-        use_container_width=True,
-        hide_index=True,
+        baja_ef_df, use_container_width=True, hide_index=True,
         column_config={
             "eficiencia_pct": st.column_config.ProgressColumn(
                 "Eficiencia (%)", min_value=0, max_value=100, format="%.1f%%"
@@ -294,4 +294,4 @@ else:
     st.success("✅ No hay órdenes críticas con los filtros actuales.")
 
 st.divider()
-st.caption("MetalParts Analytics · MetalParts Manufacturing · Desarrollado con Streamlit + Plotly")
+st.caption("MetalParts Analytics · MetalParts Manufacturing · Desarrollado con Streamlit + Matplotlib")
